@@ -2,7 +2,10 @@ torch>=2.2
 transformers>=4.41
 accelerate>=0.33
 bitsandbytes>=0.43 ; platform_system=="Linux"
-datasets>=2.20
+datasets>=2.12,<2.19
+lm-eval>=0.4.2,<0.5
+einops>=0.7
+tiktoken>=0.6
 pandas>=2.2
 numpy>=1.26
 matplotlib>=3.8
