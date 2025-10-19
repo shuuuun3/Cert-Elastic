@@ -18,8 +18,47 @@ def judge_gsm8k(ref: str, pred: str) -> bool:
 
 # ---- MATH (Hendrycks)
 def load_math(split="test", n=None):
-    ds = load_dataset("hendrycks/competition_math")[split]
-    items = [{"id": f"math_{i}", "prompt": ex["problem"], "answer": ex["solution"]} for i, ex in enumerate(ds)]
+    """
+    Hendrycks MATH は複数コンフィグ（algebra, geometry 等）に分割されているため、
+    代表的な全カテゴリを順番に読み込み、結合して返す。
+    Datasets のバージョンや命名差異に備え、データセットIDも冗長にフォールバック。
+    """
+    configs = [
+        "algebra",
+        "counting_and_probability",
+        "geometry",
+        "intermediate_algebra",
+        "number_theory",
+        "prealgebra",
+        "precalculus",
+    ]
+    ds_ids = ["hendrycks/competition_math", "competition_math"]
+    items = []
+    for cfg in configs:
+        loaded = None
+        last_err = None
+        for ds_id in ds_ids:
+            try:
+                loaded = load_dataset(ds_id, cfg)[split]
+                break
+            except Exception as e:
+                last_err = e
+                loaded = None
+        if loaded is None:
+            # 1カテゴリ取得に失敗した場合はスキップ（最後に少なくとも1カテゴリあれば続行）
+            continue
+        for i, ex in enumerate(loaded):
+            items.append({
+                "id": f"math_{cfg}_{i}",
+                "prompt": ex.get("problem", ""),
+                "answer": ex.get("solution", ""),
+            })
+        if n and len(items) >= n:
+            break
+    if not items:
+        raise RuntimeError(
+            "Failed to load any MATH categories. Ensure internet access or install datasets cache."
+        )
     return items[:n] if n else items
 
 def judge_math(ref: str, pred: str) -> bool:

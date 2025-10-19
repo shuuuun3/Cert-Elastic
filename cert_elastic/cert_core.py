@@ -32,6 +32,24 @@ def decode_with_cert_logging(model: nn.Module,
     device = next(model.parameters()).device
     layer_state = []  # per-layer last z1 (for Δ計算)
 
+    # Ensure attention implementation supports output_attentions
+    prev_attn_impl = None
+    try:
+        if hasattr(model, "config") and hasattr(model.config, "attn_implementation"):
+            prev_attn_impl = model.config.attn_implementation
+            # sdpa などでは attention を返さないため eager 系に切り替える
+            if prev_attn_impl not in ("eager", "eager_paged", "flex_attention"):
+                if hasattr(model, "set_attn_implementation"):
+                    try:
+                        model.set_attn_implementation("eager")
+                    except Exception:
+                        model.config.attn_implementation = "eager"
+                else:
+                    model.config.attn_implementation = "eager"
+    except Exception:
+        # non-fatal: そのまま進め、後で attentions=None を検出して明示エラー
+        pass
+
     for pid, prompt in enumerate(prompts):
         inputs = tokenizer(prompt, return_tensors="pt").to(device)
         input_ids = inputs["input_ids"]
@@ -51,6 +69,17 @@ def decode_with_cert_logging(model: nn.Module,
             )
             past_key_values = out.past_key_values
             logits = out.logits[:, -1, :]
+            # If the backend still does not provide attentions, fail fast with guidance
+            if getattr(out, "attentions", None) is None:
+                # restore attn implementation if we changed it
+                try:
+                    if prev_attn_impl is not None and hasattr(model, "config") and hasattr(model.config, "attn_implementation"):
+                        model.config.attn_implementation = prev_attn_impl
+                except Exception:
+                    pass
+                raise RuntimeError(
+                    "output_attentions is None. Use attn_impl='eager' (not 'sdpa') for logging, or upgrade to a backend that supports attentions."
+                )
             if temperature > 0:
                 probs = torch.softmax(logits / max(temperature, 1e-6), dim=-1)
                 next_id = torch.multinomial(probs, num_samples=1)
@@ -113,5 +142,12 @@ def decode_with_cert_logging(model: nn.Module,
             "attn_logs": attn_logs,
         })
         torch.cuda.empty_cache()
+
+    # restore original attention implementation if it was changed
+    try:
+        if prev_attn_impl is not None and hasattr(model, "config") and hasattr(model.config, "attn_implementation"):
+            model.config.attn_implementation = prev_attn_impl
+    except Exception:
+        pass
 
     return {"results": results}
