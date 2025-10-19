@@ -45,6 +45,7 @@ Thumbs.db
 
 # Virtual environments
 .venv/
+.venv312/
 .venv*/
 venv/
 env/
@@ -52,3 +53,6 @@ ENV/
 
 # Logs
 *.log
+
+# External repos / submodules (ignore vendored code)
+ext/
