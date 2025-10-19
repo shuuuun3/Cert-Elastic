@@ -22,6 +22,18 @@ import sys
 from pathlib import Path
 
 
+def _resolve_hf_token() -> str | None:
+    token = os.environ.get("HF_TOKEN")
+    if token:
+        return token
+    try:
+        from huggingface_hub import HfFolder  # type: ignore
+
+        return HfFolder.get_token()
+    except Exception:
+        return None
+
+
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
 
@@ -46,7 +58,13 @@ def prefetch_datasets(smoke: bool = False):
         return
 
     cache_kwargs = _env_cache_kwargs()
-    cache_kwargs.setdefault("token", True)
+    token = _resolve_hf_token()
+    if token:
+        cache_kwargs["token"] = token
+    else:
+        cache_kwargs.pop("token", None)
+        if not smoke:
+            print("[prefetch] warn: no Hugging Face token detected. Set HF_TOKEN or run huggingface_hub.login().")
     print("[prefetch] cache kwargs:", cache_kwargs or "<default>")
 
     def _safe(label: str, fn, allow_fail: bool = False):

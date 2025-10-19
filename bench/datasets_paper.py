@@ -8,6 +8,16 @@ _HF_CACHE = (
     or os.environ.get("TRANSFORMERS_CACHE")
 )
 
+def _hf_token():
+    token = os.environ.get("HF_TOKEN")
+    if token:
+        return token
+    try:
+        from huggingface_hub import HfFolder  # type: ignore
+        return HfFolder.get_token()
+    except Exception:
+        return None
+
 def _load_dataset(*args, **kwargs):
     """
     Wrapper that respects HF cache envs so Colab runs backed by Drive do not
@@ -16,7 +26,10 @@ def _load_dataset(*args, **kwargs):
     if _HF_CACHE:
         kwargs.setdefault("cache_dir", _HF_CACHE)
     kwargs.setdefault("trust_remote_code", True)
-    kwargs.setdefault("token", True)
+    token = _hf_token()
+    if token:
+        kwargs.setdefault("token", token)
+    return load_dataset(*args, **kwargs)
     return load_dataset(*args, **kwargs)
 
 def normalize_number(s: str) -> str:
