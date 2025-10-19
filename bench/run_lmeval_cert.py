@@ -60,7 +60,11 @@ def _load_parquet_dataset(splits_map, features):
         if not path.exists():
             return None
     for split, path in splits_map.items():
-        ds = _ORIGINAL_LOAD_DATASET("parquet", data_files={split: str(path)})[split].cast(features)
+        ds_raw = _ORIGINAL_LOAD_DATASET("parquet", data_files={split: str(path)})[split]
+        try:
+            ds = ds_raw.cast(features) if features is not None else ds_raw
+        except Exception:
+            ds = ds_raw
         data[split] = ds
     return DatasetDict(data)
 
@@ -125,7 +129,14 @@ def enable_local_datasets():
     if getattr(enable_local_datasets, "_patched", False):
         return
 
-    def wrapper(path_or_name, *args, **kwargs):
+    def wrapper(path_or_name=None, *args, **kwargs):
+        args = list(args)
+        if path_or_name is None and "path_or_name" in kwargs:
+            path_or_name = kwargs.pop("path_or_name")
+        if path_or_name is None and args:
+            path_or_name = args.pop(0)
+        if path_or_name is None:
+            raise TypeError("datasets.load_dataset wrapper requires path_or_name")
         target = path_or_name.lower() if isinstance(path_or_name, str) else path_or_name
         split = kwargs.get("split")
         local_ds = None
