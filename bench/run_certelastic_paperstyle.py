@@ -86,10 +86,23 @@ def main():
     for task in args.tasks.split(","):
         task = task.strip()
         print(f"[run] {task} n={args.n_items} gen_len={args.gen_len}")
-        results[task] = run_task(
-            mdl, tok, task, args.n_items, args.gen_len,
-            args.temperature, args.top_p, args.top_k
-        )
+        try:
+            # run_task may raise (e.g. dataset load failures). Catch and continue.
+            results[task] = run_task(
+                mdl, tok, task, args.n_items, args.gen_len,
+                args.temperature, args.top_p, args.top_k
+            )
+            # If loader returned an empty list, mark as skipped for clarity
+            if results[task].get('n', 0) == 0:
+                results[task]['skipped'] = True
+                results[task]['reason'] = 'no data loaded (empty dataset)'
+        except RuntimeError as e:
+            print(f"[warn] task {task} skipped due to runtime error: {e}")
+            results[task] = {"skipped": True, "reason": str(e)}
+        except Exception as e:
+            # catch-all to avoid one failing task stopping the whole script
+            print(f"[warn] task {task} skipped due to unexpected error: {e}")
+            results[task] = {"skipped": True, "reason": str(e)}
 
     # 保存（vizがそのまま読める形）
     out_path = Path(run_dir) / Path(args.out).name
