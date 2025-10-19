@@ -46,6 +46,7 @@ def prefetch_datasets(smoke: bool = False):
         return
 
     cache_kwargs = _env_cache_kwargs()
+    cache_kwargs.setdefault("token", True)
     print("[prefetch] cache kwargs:", cache_kwargs or "<default>")
 
     def _safe(label: str, fn, allow_fail: bool = False):
