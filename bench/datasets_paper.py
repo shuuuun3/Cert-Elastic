@@ -1,6 +1,16 @@
 # bench/datasets_paper.py
 from datasets import load_dataset
 import os, re, json, logging
+from pathlib import Path
+
+ROOT_DIR = Path(__file__).resolve().parent.parent
+LOCAL_MATH_PARQUET = ROOT_DIR / "data" / "hendrycks_math" / "hendrycks_math.parquet"
+LOCAL_HUMAN_EVAL_PARQUET = ROOT_DIR / "data" / "openai_humaneval" / "openai_humaneval_test.parquet"
+LOCAL_MBPP_PARQUET = ROOT_DIR / "data" / "mbpp" / "mbpp_test.parquet"
+LOCAL_GSM8K_PARQUETS = {
+    "train": ROOT_DIR / "data" / "gsm8k" / "gsm8k_train.parquet",
+    "test": ROOT_DIR / "data" / "gsm8k" / "gsm8k_test.parquet",
+}
 
 _HF_CACHE = (
     os.environ.get("HF_DATASETS_CACHE")
@@ -30,7 +40,6 @@ def _load_dataset(*args, **kwargs):
     if token:
         kwargs.setdefault("token", token)
     return load_dataset(*args, **kwargs)
-    return load_dataset(*args, **kwargs)
 
 def normalize_number(s: str) -> str:
     if not s: return ""
@@ -39,8 +48,12 @@ def normalize_number(s: str) -> str:
 
 # ---- GSM8K
 def load_gsm8k(split="test", n=None):
-    ds = _load_dataset("gsm8k", "main")[split]
-    items = [{"id": f"gsm8k_{i}", "prompt": ex["question"] + " A:", "answer": ex["answer"]} for i, ex in enumerate(ds)]
+    local_path = LOCAL_GSM8K_PARQUETS.get(split)
+    if local_path and local_path.exists():
+        ds = load_dataset("parquet", data_files={split: str(local_path)})[split]
+    else:
+        ds = _load_dataset("gsm8k", "main")[split]
+    items = [{"id": ex.get("id", f"gsm8k_{i}"), "prompt": ex.get("question", "") + " A:", "answer": ex.get("answer", "")} for i, ex in enumerate(ds)]
     return items[:n] if n else items
 
 def judge_gsm8k(ref: str, pred: str) -> bool:
@@ -53,6 +66,24 @@ def load_math(split="test", n=None):
     代表的な全カテゴリを順番に読み込み、結合して返す。
     Datasets のバージョンや命名差異に備え、データセットIDも冗長にフォールバック。
     """
+    if LOCAL_MATH_PARQUET.exists():
+        ds = load_dataset(
+            "parquet",
+            data_files={"train": str(LOCAL_MATH_PARQUET)},
+        )["train"]
+        items = []
+        for i, ex in enumerate(ds):
+            items.append({
+                "id": ex.get("id", f"math_local_{i}"),
+                "prompt": ex.get("problem", ex.get("question", "")),
+                "answer": ex.get("solution", ex.get("answer", "")),
+            })
+            if n and len(items) >= n:
+                break
+        if not items:
+            raise RuntimeError("Local MATH parquet found but produced no items.")
+        return items[:n] if n else items
+
     configs = [
         "algebra",
         "counting_and_probability",
@@ -62,7 +93,7 @@ def load_math(split="test", n=None):
         "prealgebra",
         "precalculus",
     ]
-    ds_ids = ["hendrycks/competition_math", "competition_math"]
+    ds_ids = ["qwedsacf/competition_math", "hendrycks/competition_math", "competition_math"]
     items = []
     for cfg in configs:
         loaded = None
@@ -97,8 +128,11 @@ def judge_math(ref: str, pred: str) -> bool:
 
 # ---- HumanEval（簡易。厳密pass@1が必要なら lm-eval を別途使用）
 def load_humaneval(n=None):
-    ds = _load_dataset("openai_humaneval")["test"]
-    items = [{"id": ex["task_id"], "prompt": ex["prompt"], "answer": ex["canonical_solution"]} for ex in ds]
+    if LOCAL_HUMAN_EVAL_PARQUET.exists():
+        ds = load_dataset("parquet", data_files={"test": str(LOCAL_HUMAN_EVAL_PARQUET)})["test"]
+    else:
+        ds = _load_dataset("openai_humaneval")["test"]
+    items = [{"id": ex.get("task_id", f"humaneval_{i}"), "prompt": ex["prompt"], "answer": ex.get("canonical_solution", ex.get("solution", ""))} for i, ex in enumerate(ds)]
     return items[:n] if n else items
 
 def judge_humaneval(ref: str, pred: str) -> bool:
@@ -106,8 +140,11 @@ def judge_humaneval(ref: str, pred: str) -> bool:
 
 # ---- MBPP（簡易）
 def load_mbpp(n=None):
-    ds = _load_dataset("mbpp", "sanitized")["test"]
-    items = [{"id": f"mbpp_{i}", "prompt": ex["text"], "answer": ex["code"]} for i, ex in enumerate(ds)]
+    if LOCAL_MBPP_PARQUET.exists():
+        ds = load_dataset("parquet", data_files={"test": str(LOCAL_MBPP_PARQUET)})["test"]
+    else:
+        ds = _load_dataset("mbpp", "sanitized")["test"]
+    items = [{"id": ex.get("task_id", f"mbpp_{i}"), "prompt": ex.get("text", ""), "answer": ex.get("code", "")} for i, ex in enumerate(ds)]
     return items[:n] if n else items
 
 def judge_mbpp(ref: str, pred: str) -> bool:

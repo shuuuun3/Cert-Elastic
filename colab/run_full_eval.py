@@ -35,6 +35,9 @@ def _resolve_hf_token() -> str | None:
 
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
+LOCAL_MATH_PARQUET = PROJECT_ROOT / "data" / "hendrycks_math" / "hendrycks_math.parquet"
+LOCAL_MBPP_PARQUET = PROJECT_ROOT / "data" / "mbpp" / "mbpp_test.parquet"
+LOCAL_HUMAN_EVAL_PARQUET = PROJECT_ROOT / "data" / "openai_humaneval" / "openai_humaneval_test.parquet"
 
 
 def _env_cache_kwargs() -> dict:
@@ -46,7 +49,7 @@ def _env_cache_kwargs() -> dict:
     return {"cache_dir": cache} if cache else {}
 
 
-def prefetch_datasets(smoke: bool = False):
+def prefetch_datasets(smoke: bool = False, token: str | None = None):
     """
     Pre-download benchmark datasets. When smoke=True only a minimal subset is
     fetched (still covering MATH) to save time / compute units.
@@ -58,12 +61,14 @@ def prefetch_datasets(smoke: bool = False):
         return
 
     cache_kwargs = _env_cache_kwargs()
-    token = _resolve_hf_token()
+    if token is None:
+        token = _resolve_hf_token()
+    token_missing = token is None
     if token:
         cache_kwargs["token"] = token
     else:
         cache_kwargs.pop("token", None)
-        if not smoke:
+        if not smoke and not LOCAL_MATH_PARQUET.exists():
             print("[prefetch] warn: no Hugging Face token detected. Set HF_TOKEN or run huggingface_hub.login().")
     print("[prefetch] cache kwargs:", cache_kwargs or "<default>")
 
@@ -81,46 +86,62 @@ def prefetch_datasets(smoke: bool = False):
         lambda: load_dataset("gsm8k", "main", trust_remote_code=True, **cache_kwargs),
     )
 
-    math_cfgs = (
-        ["algebra"]
-        if smoke
-        else [
-            "algebra",
-            "counting_and_probability",
-            "geometry",
-            "intermediate_algebra",
-            "number_theory",
-            "prealgebra",
-            "precalculus",
-        ]
-    )
-    for cfg in math_cfgs:
-        def _load_math():
-            last_error = None
-            for ds_id in ("hendrycks/competition_math", "competition_math"):
-                try:
-                    load_dataset(
-                        ds_id, cfg, trust_remote_code=True, **cache_kwargs
-                    )
-                    return
-                except Exception as err:  # noqa: BLE001
-                    last_error = err
-            raise RuntimeError(last_error or f"unknown error loading {cfg}")
+    if LOCAL_MATH_PARQUET.exists():
+        def _load_math_local():
+            load_dataset(
+                "parquet",
+                data_files={"train": str(LOCAL_MATH_PARQUET)},
+                **cache_kwargs,
+            )
 
-        _safe(f"math/{cfg}", _load_math, allow_fail=smoke)
+        _safe("math/local_parquet", _load_math_local, allow_fail=True)
+    else:
+        math_cfgs = (
+            ["algebra"]
+            if smoke
+            else [
+                "algebra",
+                "counting_and_probability",
+                "geometry",
+                "intermediate_algebra",
+                "number_theory",
+                "prealgebra",
+                "precalculus",
+            ]
+        )
+        for cfg in math_cfgs:
+            def _load_math():
+                last_error = None
+                for ds_id in ("qwedsacf/competition_math", "hendrycks/competition_math", "competition_math"):
+                    try:
+                        load_dataset(
+                            ds_id, cfg, trust_remote_code=True, **cache_kwargs
+                        )
+                        return
+                    except Exception as err:  # noqa: BLE001
+                        last_error = err
+                raise RuntimeError(last_error or f"unknown error loading {cfg}")
 
-    _safe(
-        "openai_humaneval",
-        lambda: load_dataset(
-            "openai_humaneval", trust_remote_code=True, **cache_kwargs
-        ),
-        allow_fail=smoke,
-    )
-    _safe(
-        "mbpp/sanitized",
-        lambda: load_dataset("mbpp", "sanitized", trust_remote_code=True, **cache_kwargs),
-        allow_fail=smoke,
-    )
+            _safe(f"math/{cfg}", _load_math, allow_fail=(smoke or token_missing))
+
+    if LOCAL_HUMAN_EVAL_PARQUET.exists():
+        print("[prefetch] openai_humaneval local parquet detected; skipping download")
+    else:
+        _safe(
+            "openai_humaneval",
+            lambda: load_dataset(
+                "openai_humaneval", trust_remote_code=True, **cache_kwargs
+            ),
+            allow_fail=smoke,
+        )
+    if LOCAL_MBPP_PARQUET.exists():
+        print("[prefetch] mbpp local parquet detected; skipping download")
+    else:
+        _safe(
+            "mbpp/sanitized",
+            lambda: load_dataset("mbpp", "sanitized", trust_remote_code=True, **cache_kwargs),
+            allow_fail=smoke,
+        )
     print("[prefetch] dataset warmup finished")
 
 
@@ -209,8 +230,30 @@ def main():
         args.skip_viz = True
         args.math_probe = True
 
+    token_for_main = _resolve_hf_token()
+    token_missing = token_for_main is None
+    math_local_available = LOCAL_MATH_PARQUET.exists()
+    paper_tasks = "gsm8k,math,humaneval,mbpp"
+
+    if token_missing and not math_local_available:
+        if args.tasks:
+            filtered = ",".join([t for t in args.tasks.split(",") if "math" not in t.lower()])
+            if filtered != args.tasks:
+                print(f"[main] removed math-like tasks from lm-eval: {args.tasks} -> {filtered or '(none)'}")
+            args.tasks = filtered
+            if not args.tasks:
+                args.skip_lmeval = True
+        paper_filtered = ",".join([t for t in paper_tasks.split(",") if t != "math"])
+        if paper_filtered != paper_tasks:
+            print("[main] math dataset requires HF token; paper-style math will be skipped.")
+        paper_tasks = paper_filtered
+        if not paper_tasks:
+            args.skip_paper = True
+    elif math_local_available and token_missing:
+        print("[main] using local data/0000.parquet for MATH tasks (no HF token).")
+
     if not args.skip_prefetch:
-        prefetch_datasets(smoke=args.smoke_test)
+        prefetch_datasets(smoke=args.smoke_test, token=token_for_main)
     else:
         print("[prefetch] skipped by flag")
 
@@ -312,7 +355,7 @@ def main():
                 "--beta",
                 str(args.beta),
                 "--tasks",
-                "gsm8k,math,humaneval,mbpp",
+                paper_tasks,
                 "--n_items",
                 str(args.paper_n_items),
                 "--gen_len",
