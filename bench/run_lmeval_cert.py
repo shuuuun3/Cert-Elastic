@@ -6,6 +6,8 @@ from lm_eval.tasks import TaskManager
 from bench.lmeval_cert_runner import HFCertElasticLM
 from cert_elastic.utils import make_run_dir, dump_json
 import os
+import datasets
+from datasets import DatasetDict, Features, Sequence, Value
 
 os.environ.setdefault("HF_ALLOW_CODE_EVAL", "1")
 
@@ -15,6 +17,140 @@ ALIASES = {
     "gsm8k": ["gsm8k"],
     "hendrycks_math": ["hendrycks_math", "math"],
 }
+
+LOCAL_DATA_ROOT = Path(__file__).resolve().parent.parent / "data"
+LOCAL_GSM8K_PARQUETS = {
+    "train": LOCAL_DATA_ROOT / "gsm8k" / "gsm8k_train.parquet",
+    "test": LOCAL_DATA_ROOT / "gsm8k" / "gsm8k_test.parquet",
+}
+LOCAL_MBPP_PATHS = {
+    "train": LOCAL_DATA_ROOT / "mbpp" / "mbpp_train.parquet",
+    "validation": LOCAL_DATA_ROOT / "mbpp" / "mbpp_validation.parquet",
+    "test": LOCAL_DATA_ROOT / "mbpp" / "mbpp_test.parquet",
+    "prompt": LOCAL_DATA_ROOT / "mbpp" / "mbpp_prompt.parquet",
+}
+LOCAL_HF_DATASETS = {
+    "gsm8k": LOCAL_DATA_ROOT / "hf_cache" / "gsm8k_main",
+    "mbpp": LOCAL_DATA_ROOT / "hf_cache" / "mbpp_sanitized",
+    "openai_humaneval": LOCAL_DATA_ROOT / "hf_cache" / "openai_humaneval",
+    "hendrycks_math": LOCAL_DATA_ROOT / "hf_cache" / "hendrycks_math",
+}
+
+LOCAL_HUMAN_EVAL_PARQUET = LOCAL_DATA_ROOT / "openai_humaneval" / "openai_humaneval_test.parquet"
+LOCAL_MATH_PARQUET = LOCAL_DATA_ROOT / "hendrycks_math" / "hendrycks_math.parquet"
+
+_ORIGINAL_LOAD_DATASET = datasets.load_dataset
+
+
+def _load_from_disk_dataset(key: str):
+    path = LOCAL_HF_DATASETS.get(key)
+    if path and path.exists():
+        ds = datasets.load_from_disk(path)
+        if isinstance(ds, DatasetDict):
+            data = {k: v for k, v in ds.items()}
+            if "train" not in data and "test" in data:
+                data["train"] = data["test"]
+            return DatasetDict(data)
+    return None
+
+
+def _load_parquet_dataset(splits_map, features):
+    data = {}
+    for split, path in splits_map.items():
+        if not path.exists():
+            return None
+    for split, path in splits_map.items():
+        ds = _ORIGINAL_LOAD_DATASET("parquet", data_files={split: str(path)})[split].cast(features)
+        data[split] = ds
+    return DatasetDict(data)
+
+
+def _local_gsm8k():
+    ds_disk = _load_from_disk_dataset("gsm8k")
+    if ds_disk is not None:
+        return ds_disk
+    feats = Features({"question": Value("string"), "answer": Value("string")})
+    return _load_parquet_dataset(LOCAL_GSM8K_PARQUETS, feats)
+
+
+def _local_mbpp():
+    ds_disk = _load_from_disk_dataset("mbpp")
+    if ds_disk is not None:
+        return ds_disk
+    feats = Features({
+        "source_file": Value("string"),
+        "task_id": Value("int32"),
+        "prompt": Value("string"),
+        "code": Value("string"),
+        "test_imports": Sequence(Value("string")),
+        "test_list": Sequence(Value("string")),
+    })
+    return _load_parquet_dataset(LOCAL_MBPP_PATHS, feats)
+
+
+def _local_humaneval():
+    ds_disk = _load_from_disk_dataset("openai_humaneval")
+    if ds_disk is not None:
+        return ds_disk
+    if not LOCAL_HUMAN_EVAL_PARQUET.exists():
+        return None
+    feats = Features({
+        "task_id": Value("string"),
+        "prompt": Value("string"),
+        "canonical_solution": Value("string"),
+        "test": Value("string"),
+        "entry_point": Value("string"),
+    })
+    ds = _ORIGINAL_LOAD_DATASET("parquet", data_files={"test": str(LOCAL_HUMAN_EVAL_PARQUET)})["test"].cast(feats)
+    return DatasetDict({"test": ds})
+
+
+def _local_math():
+    ds_disk = _load_from_disk_dataset("hendrycks_math")
+    if ds_disk is not None:
+        return ds_disk
+    if not LOCAL_MATH_PARQUET.exists():
+        return None
+    feats = Features({
+        "id": Value("string"),
+        "prompt": Value("string"),
+        "answer": Value("string"),
+        "category": Value("string"),
+    })
+    ds = _ORIGINAL_LOAD_DATASET("parquet", data_files={"test": str(LOCAL_MATH_PARQUET)})["test"].cast(feats)
+    return DatasetDict({"test": ds, "train": ds})
+
+
+def enable_local_datasets():
+    if getattr(enable_local_datasets, "_patched", False):
+        return
+
+    def wrapper(path_or_name, *args, **kwargs):
+        target = path_or_name.lower() if isinstance(path_or_name, str) else path_or_name
+        split = kwargs.get("split")
+        local_ds = None
+        if isinstance(target, str):
+            if target == "gsm8k":
+                local_ds = _local_gsm8k()
+            elif target in ("openai_humaneval", "humaneval", "human_eval", "humaneval_python"):
+                local_ds = _local_humaneval()
+            elif target in ("mbpp", "mbpp_sanitized", "mbppplus", "mbpp_plus"):
+                local_ds = _local_mbpp()
+            elif target in ("hendrycks_math", "math"):
+                local_ds = _local_math()
+        if local_ds is not None:
+            if split:
+                if split in local_ds:
+                    return local_ds[split]
+                if split == "train" and "test" in local_ds:
+                    return local_ds["test"]
+                raise KeyError(f"Local dataset missing requested split '{split}'.")
+            return local_ds
+        return _ORIGINAL_LOAD_DATASET(path_or_name, *args, **kwargs)
+
+    datasets.load_dataset = wrapper
+    enable_local_datasets._patched = True
+
 
 def resolve_tasks(user_csv: str) -> list[str]:
     tm = TaskManager()
@@ -47,6 +183,7 @@ def pick_primary(name, resdict):
     return None, None
 
 def run_once(enable_cert: bool, args):
+    enable_local_datasets()
     lm = HFCertElasticLM(
         pretrained=args.model_id, dtype=args.dtype, device=(args.device or "auto"),
         enable_cert=enable_cert, epsilon=args.epsilon, alpha=args.alpha, beta=args.beta,

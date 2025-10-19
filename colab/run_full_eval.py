@@ -38,6 +38,10 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 LOCAL_MATH_PARQUET = PROJECT_ROOT / "data" / "hendrycks_math" / "hendrycks_math.parquet"
 LOCAL_MBPP_PARQUET = PROJECT_ROOT / "data" / "mbpp" / "mbpp_test.parquet"
 LOCAL_HUMAN_EVAL_PARQUET = PROJECT_ROOT / "data" / "openai_humaneval" / "openai_humaneval_test.parquet"
+LOCAL_GSM8K_PARQUETS = {
+    "train": PROJECT_ROOT / "data" / "gsm8k" / "gsm8k_train.parquet",
+    "test": PROJECT_ROOT / "data" / "gsm8k" / "gsm8k_test.parquet",
+}
 
 
 def _env_cache_kwargs() -> dict:
@@ -81,10 +85,13 @@ def prefetch_datasets(smoke: bool = False, token: str | None = None):
             if not allow_fail:
                 raise
 
-    _safe(
-        "gsm8k/main",
-        lambda: load_dataset("gsm8k", "main", trust_remote_code=True, **cache_kwargs),
-    )
+    if all(path.exists() for path in LOCAL_GSM8K_PARQUETS.values()):
+        print("[prefetch] gsm8k local parquet detected; skipping download")
+    else:
+        _safe(
+            "gsm8k/main",
+            lambda: load_dataset("gsm8k", "main", trust_remote_code=True, **cache_kwargs),
+        )
 
     if LOCAL_MATH_PARQUET.exists():
         def _load_math_local():
@@ -250,7 +257,7 @@ def main():
         if not paper_tasks:
             args.skip_paper = True
     elif math_local_available and token_missing:
-        print("[main] using local data/0000.parquet for MATH tasks (no HF token).")
+        print(f"[main] using local {LOCAL_MATH_PARQUET.relative_to(PROJECT_ROOT)} for MATH tasks (no HF token).")
 
     if not args.skip_prefetch:
         prefetch_datasets(smoke=args.smoke_test, token=token_for_main)
