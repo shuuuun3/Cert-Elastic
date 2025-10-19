@@ -48,15 +48,19 @@ def prefetch_datasets(smoke: bool = False):
     cache_kwargs = _env_cache_kwargs()
     print("[prefetch] cache kwargs:", cache_kwargs or "<default>")
 
-    def _safe(label: str, fn):
+    def _safe(label: str, fn, allow_fail: bool = False):
         try:
             fn()
             print(f"[prefetch] ok: {label}")
         except Exception as err:  # noqa: BLE001
             print(f"[prefetch] warn: {label} failed -> {err}")
-            raise
+            if not allow_fail:
+                raise
 
-    _safe("gsm8k/main", lambda: load_dataset("gsm8k", "main", **cache_kwargs))
+    _safe(
+        "gsm8k/main",
+        lambda: load_dataset("gsm8k", "main", trust_remote_code=True, **cache_kwargs),
+    )
 
     math_cfgs = (
         ["algebra"]
@@ -76,20 +80,32 @@ def prefetch_datasets(smoke: bool = False):
             last_error = None
             for ds_id in ("hendrycks/competition_math", "competition_math"):
                 try:
-                    load_dataset(ds_id, cfg, **cache_kwargs)
+                    load_dataset(
+                        ds_id, cfg, trust_remote_code=True, **cache_kwargs
+                    )
                     return
                 except Exception as err:  # noqa: BLE001
                     last_error = err
             raise RuntimeError(last_error or f"unknown error loading {cfg}")
 
-        _safe(f"math/{cfg}", _load_math)
+        _safe(f"math/{cfg}", _load_math, allow_fail=smoke)
 
-    _safe("openai_humaneval", lambda: load_dataset("openai_humaneval", **cache_kwargs))
-    _safe("mbpp/sanitized", lambda: load_dataset("mbpp", "sanitized", **cache_kwargs))
+    _safe(
+        "openai_humaneval",
+        lambda: load_dataset(
+            "openai_humaneval", trust_remote_code=True, **cache_kwargs
+        ),
+        allow_fail=smoke,
+    )
+    _safe(
+        "mbpp/sanitized",
+        lambda: load_dataset("mbpp", "sanitized", trust_remote_code=True, **cache_kwargs),
+        allow_fail=smoke,
+    )
     print("[prefetch] dataset warmup finished")
 
 
-def math_probe():
+def math_probe(strict: bool = False):
     """
     Load a single MATH example via the project loader as an early failure check.
     """
@@ -99,10 +115,20 @@ def math_probe():
 
         sample = load_math(n=1)
     except Exception as exc:  # noqa: BLE001
-        print("[math-probe] failed:", exc)
-        raise
+        print(
+            "[math-probe] failed:",
+            exc,
+            "\n[math-probe] If this is an authentication issue, login with `from huggingface_hub import login; login(token=...)` or set HF_TOKEN.",
+        )
+        if strict:
+            raise
+        return
     if not sample:
-        raise RuntimeError("[math-probe] load_math returned no samples")
+        msg = "[math-probe] load_math returned no samples"
+        print(msg)
+        if strict:
+            raise RuntimeError(msg)
+        return
     item = sample[0]
     print(f"[math-probe] ok: {item['id']} (prompt len={len(item.get('prompt',''))})")
 
@@ -170,7 +196,7 @@ def main():
         print("[prefetch] skipped by flag")
 
     if args.math_probe:
-        math_probe()
+        math_probe(strict=not args.smoke_test)
 
     py = sys.executable
 

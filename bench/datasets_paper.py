@@ -15,6 +15,7 @@ def _load_dataset(*args, **kwargs):
     """
     if _HF_CACHE:
         kwargs.setdefault("cache_dir", _HF_CACHE)
+    kwargs.setdefault("trust_remote_code", True)
     return load_dataset(*args, **kwargs)
 
 def normalize_number(s: str) -> str:
