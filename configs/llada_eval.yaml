@@ -1,0 +1,7 @@
+llada_ckpt: "ML-GSAI/LLaDA-1.5-8B"   # 例。実在の公開名に合わせて置換
+gen_len: 512
+beta: 16
+gamma: 0.9
+eps: 0.9
+n_items: 512
+tasks: "gsm8k,math,humaneval,mbpp"

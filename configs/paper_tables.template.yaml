@@ -1,0 +1,36 @@
+tables:
+  GSM8K:
+    rows:
+      - gen_len: 256
+        LLaDA:       {acc: 77.5, tps: 3.23}        # 論文orFast-dLLM表の値
+        Fast-dLLM:   {acc: 77.2, tps: 35.3}        # 同上
+      - gen_len: 512
+        LLaDA:       {acc: 77.0, tps: 3.23}
+        Fast-dLLM:   {acc: 77.2, tps: 35.3}
+
+  HumanEval:
+    rows:
+      - gen_len: 256
+        LLaDA:       {acc: 41.5, tps: 30.5}
+        Fast-dLLM:   {acc: 43.3, tps: 114.1}
+      - gen_len: 512
+        LLaDA:       {acc: 43.9, tps: 18.4}
+        Fast-dLLM:   {acc: 44.5, tps: 73.7}
+
+  MATH:
+    rows:
+      - gen_len: 256
+        LLaDA:       {acc: 33.58,   tps: 9.5}          # 論文orFast-dLLM表の値
+        Fast-dLLM:   {acc: 32.50,   tps: 49.0}          # 同上
+      - gen_len: 512
+        LLaDA:       {acc: 37.20,   tps: 7.1}
+        Fast-dLLM:   {acc: 35.70,   tps: 52.8}
+
+  MBPP:
+    rows:
+      - gen_len: 256
+        LLaDA:       {acc: 29.80,   tps: 6.5}
+        Fast-dLLM:   {acc: 25.40,   tps: 45.1}
+      - gen_len: 512
+        LLaDA:       {acc: 15.0,   tps: 4.7}
+        Fast-dLLM:   {acc: 13.6,   tps: 44.7}

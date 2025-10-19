@@ -1,0 +1,3 @@
+{"id":"g1","prompt":"Q: 3人で24個のクッキーを等分します。1人あたり何個ですか？ A:","reference":"8"}
+{"id":"g2","prompt":"Q: 列車は時速80kmで2.5時間走る。走行距離は？ A:","reference":"200"}
+{"id":"g3","prompt":"Explain briefly why the sky appears blue.","reference":"The sky appears blue due to Rayleigh scattering which scatters shorter wavelengths more."}
