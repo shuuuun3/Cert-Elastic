@@ -58,6 +58,8 @@ def prefetch_datasets(smoke: bool = False, token: str | None = None):
     Pre-download benchmark datasets. When smoke=True only a minimal subset is
     fetched (still covering MATH) to save time / compute units.
     """
+    os.environ.setdefault("HF_DATASETS_TRUST_REMOTE_CODE", "1")
+
     try:
         from datasets import load_dataset
     except Exception as exc:  # noqa: BLE001
