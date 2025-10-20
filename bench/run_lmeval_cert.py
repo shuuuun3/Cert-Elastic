@@ -125,6 +125,19 @@ def _local_math():
     return DatasetDict({"test": ds, "train": ds})
 
 
+def _local_dataset_for(target: str):
+    key = target.lower()
+    if key == "gsm8k":
+        return _local_gsm8k()
+    if key in ("openai_humaneval", "humaneval", "human_eval", "humaneval_python"):
+        return _local_humaneval()
+    if key in ("mbpp", "mbpp_sanitized", "mbppplus", "mbpp_plus"):
+        return _local_mbpp()
+    if key in ("hendrycks_math", "math"):
+        return _local_math()
+    return None
+
+
 def enable_local_datasets():
     if getattr(enable_local_datasets, "_patched", False):
         return
@@ -137,19 +150,16 @@ def enable_local_datasets():
             path_or_name = args.pop(0)
         if path_or_name is None:
             raise TypeError("datasets.load_dataset wrapper requires path_or_name")
+
         target = path_or_name.lower() if isinstance(path_or_name, str) else path_or_name
         split = kwargs.get("split")
-        local_ds = None
-        if isinstance(target, str):
-            if target == "gsm8k":
-                local_ds = _local_gsm8k()
-            elif target in ("openai_humaneval", "humaneval", "human_eval", "humaneval_python"):
-                local_ds = _local_humaneval()
-            elif target in ("mbpp", "mbpp_sanitized", "mbppplus", "mbpp_plus"):
-                local_ds = _local_mbpp()
-            elif target in ("hendrycks_math", "math"):
-                local_ds = _local_math()
-        if local_ds is not None:
+        try:
+            return _ORIGINAL_LOAD_DATASET(path_or_name, *args, **kwargs)
+        except Exception as remote_err:  # noqa: BLE001
+            local_ds = _local_dataset_for(target) if isinstance(target, str) else None
+            if local_ds is None:
+                raise
+            print(f"[datasets] remote load failed for {path_or_name!r}; falling back to local cache: {remote_err}")
             if split:
                 if split in local_ds:
                     return local_ds[split]
@@ -157,7 +167,6 @@ def enable_local_datasets():
                     return local_ds["test"]
                 raise KeyError(f"Local dataset missing requested split '{split}'.")
             return local_ds
-        return _ORIGINAL_LOAD_DATASET(path_or_name, *args, **kwargs)
 
     datasets.load_dataset = wrapper
     enable_local_datasets._patched = True

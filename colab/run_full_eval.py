@@ -88,10 +88,7 @@ def prefetch_datasets(smoke: bool = False, token: str | None = None):
     if all(path.exists() for path in LOCAL_GSM8K_PARQUETS.values()):
         print("[prefetch] gsm8k local parquet detected; skipping download")
     else:
-        _safe(
-            "gsm8k/main",
-            lambda: load_dataset("gsm8k", "main", trust_remote_code=True, **cache_kwargs),
-        )
+        _safe("gsm8k/main", lambda: load_dataset("gsm8k", "main", **cache_kwargs))
 
     if LOCAL_MATH_PARQUET.exists():
         def _load_math_local():
@@ -121,9 +118,7 @@ def prefetch_datasets(smoke: bool = False, token: str | None = None):
                 last_error = None
                 for ds_id in ("qwedsacf/competition_math", "hendrycks/competition_math", "competition_math"):
                     try:
-                        load_dataset(
-                            ds_id, cfg, trust_remote_code=True, **cache_kwargs
-                        )
+                        load_dataset(ds_id, cfg, **cache_kwargs)
                         return
                     except Exception as err:  # noqa: BLE001
                         last_error = err
@@ -136,9 +131,7 @@ def prefetch_datasets(smoke: bool = False, token: str | None = None):
     else:
         _safe(
             "openai_humaneval",
-            lambda: load_dataset(
-                "openai_humaneval", trust_remote_code=True, **cache_kwargs
-            ),
+            lambda: load_dataset("openai_humaneval", **cache_kwargs),
             allow_fail=smoke,
         )
     if LOCAL_MBPP_PARQUET.exists():
@@ -146,7 +139,7 @@ def prefetch_datasets(smoke: bool = False, token: str | None = None):
     else:
         _safe(
             "mbpp/sanitized",
-            lambda: load_dataset("mbpp", "sanitized", trust_remote_code=True, **cache_kwargs),
+            lambda: load_dataset("mbpp", "sanitized", **cache_kwargs),
             allow_fail=smoke,
         )
     print("[prefetch] dataset warmup finished")

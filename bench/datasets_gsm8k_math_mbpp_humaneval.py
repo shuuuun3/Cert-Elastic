@@ -117,7 +117,7 @@ def load_math(split="test", n=None):
         last_err = None
         for ds_id in ("qwedsacf/competition_math", "hendrycks/competition_math", "competition_math"):
             try:
-                ds = load_dataset(ds_id, split=split, trust_remote_code=True)
+                ds = load_dataset(ds_id, split=split)
                 break
             except Exception as err:
                 last_err = err
