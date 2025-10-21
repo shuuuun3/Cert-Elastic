@@ -1,6 +1,10 @@
 # bench/run_lmeval_cert.py（先頭～mainのtasks処理のみ重要差分）
 import argparse, json
 from pathlib import Path
+import os
+
+os.environ.setdefault("HF_ALLOW_CODE_EVAL", "1")
+
 from lm_eval import evaluator
 from lm_eval.tasks import TaskManager
 from bench.lmeval_cert_runner import HFCertElasticLM
@@ -222,6 +226,8 @@ def run_once(enable_cert: bool, args):
     # lm_eval will execute task code when these tasks require code evaluation.
     limit_to_use = args.limit
     fallback_limit = 200
+    phase = "cert" if enable_cert else "baseline"
+    print(f"[lm-eval] starting {phase} run (limit={limit_to_use}) ...")
     while True:
         try:
             res = evaluator.simple_evaluate(
@@ -248,11 +254,21 @@ def run_once(enable_cert: bool, args):
     if args.limit != limit_to_use:
         print(f"[lm-eval] effective evaluation limit: {limit_to_use}")
 
+    # Avoid writing enormous raw sample payloads to Drive unless explicitly requested.
+    if os.environ.get("LM_EVAL_STORE_SAMPLES", "0") not in ("1", "true", "True"):
+        res.pop("samples", None)
+
     ours = {}
     for tname, tres in res["results"].items():
         k, v = pick_primary(tname, tres)
         ours[tname.lower()] = {"metric_key": k, "accuracy": v}
     toks = (lm.total_new_tokens / lm.total_gen_time) if lm.total_gen_time>0 else None
+    tok_count = lm.total_new_tokens
+    if tok_count and lm.total_gen_time:
+        print(f"[lm-eval] completed {phase} run. generated {tok_count} tokens "
+              f"in {lm.total_gen_time:.2f}s (tokens/sec={toks:.2f})")
+    else:
+        print(f"[lm-eval] completed {phase} run.")
     return {"results_raw": res, "ours_primary": ours, "tokens_sec": toks}
 
 def main():
@@ -271,11 +287,24 @@ def main():
     args = ap.parse_args()
 
     run_dir = make_run_dir(args.out_dir)
-    base = run_once(False, args); dump_json(base, Path(run_dir/"lmeval_baseline.json"))
-    cert = run_once(True,  args); dump_json(cert, Path(run_dir/"lmeval_cert.json"))
+    print(f"[lm-eval] writing artifacts under {run_dir}")
+
+    base = run_once(False, args)
+    baseline_path = Path(run_dir) / "lmeval_baseline.json"
+    print(f"[lm-eval] dumping baseline results -> {baseline_path}")
+    dump_json(base, baseline_path)
+
+    cert = run_once(True,  args)
+    cert_path = Path(run_dir) / "lmeval_cert.json"
+    print(f"[lm-eval] dumping cert results -> {cert_path}")
+    dump_json(cert, cert_path)
+
     out_for_viz = {k: {"accuracy": v["accuracy"], "tokens_sec": cert["tokens_sec"]}
                    for k,v in cert["ours_primary"].items()}
-    dump_json(out_for_viz, Path(run_dir/"results.certelastic.paperstyle.json"))
+    viz_path = Path(run_dir) / "results.certelastic.paperstyle.json"
+    print(f"[lm-eval] dumping paperstyle summary -> {viz_path}")
+    dump_json(out_for_viz, viz_path)
+
     print("[done]", Path(run_dir).resolve())
 
 if __name__ == "__main__":
