@@ -105,9 +105,18 @@ def main():
             results[task] = {"skipped": True, "reason": str(e)}
 
     # 保存（vizがそのまま読める形）
-    out_path = Path(run_dir) / Path(args.out).name
-    dump_json(results, out_path)
-    print("[done]", out_path.resolve())
+    out_dir = Path(run_dir)
+    run_path = out_dir / Path(args.out).name
+    dump_json(results, run_path)
+
+    publish_path = Path(args.out)
+    if not publish_path.is_absolute():
+        publish_path = Path.cwd() / publish_path
+    publish_path.parent.mkdir(parents=True, exist_ok=True)
+    if publish_path.resolve() != run_path.resolve():
+        dump_json(results, publish_path)
+
+    print("[done]", run_path.resolve())
     cuda_clean()
 
 if __name__ == "__main__":

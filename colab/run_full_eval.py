@@ -16,6 +16,7 @@ friendly to T4 GPUs and primarily checks wiring plus dataset availability.
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import subprocess
 import sys
@@ -185,6 +186,29 @@ def run_cmd(description: str, cmd: list[str], cwd: Path) -> None:
     subprocess.run(cmd, check=True, cwd=str(cwd))
 
 
+def _latest_run_with(out_dir: Path, filename: str) -> Path | None:
+    candidates = sorted(out_dir.glob("run_*"))
+    for run in reversed(candidates):
+        target = run / filename
+        if target.exists():
+            try:
+                json.loads(target.read_text() or "{}")
+                return run
+            except Exception:
+                continue
+    return None
+
+
+def _json_file_ok(path: Path) -> bool:
+    if not path.exists():
+        return False
+    try:
+        json.loads(path.read_text() or "{}")
+        return True
+    except Exception:
+        return False
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--model-id", default="mistralai/Mistral-7B-Instruct-v0.3")
@@ -292,121 +316,149 @@ def main():
     py = sys.executable
 
     if not args.skip_logging_run:
-        run_cmd(
-            "Cert-Elastic logging run",
-            [
-                py,
-                "run_evaluate_cert.py",
-                "--model_id",
-                args.model_id,
-                "--dtype",
-                args.dtype,
-                "--device_map",
-                args.device_map,
-                "--attn_impl",
-                "eager",  # logging requires attentions
-                "--max_new_tokens",
-                str(args.max_new_tokens),
-                "--eval_prompts_n",
-                str(args.eval_prompts),
-                "--load_in_4bit",
-                str(int(bool(args.load_in_4bit))),
-                "--epsilon",
-                str(args.epsilon),
-                "--alpha",
-                str(args.alpha),
-                "--beta",
-                str(args.beta),
-                "--out_dir",
-                args.out_dir,
-                "--run_fast",
-                "1",
-            ],
-            PROJECT_ROOT,
-        )
+        if args.preflight:
+            existing_run = _latest_run_with(Path(args.out_dir), "summary.json")
+            if existing_run is not None:
+                print(f"[preflight] reuse logging run at {existing_run}")
+            else:
+                existing_run = None
+        else:
+            existing_run = None
+
+        if args.preflight and existing_run is not None:
+            print("[logging run] skipped (validated existing summary.json)")
+        else:
+            run_cmd(
+                "Cert-Elastic logging run",
+                [
+                    py,
+                    "run_evaluate_cert.py",
+                    "--model_id",
+                    args.model_id,
+                    "--dtype",
+                    args.dtype,
+                    "--device_map",
+                    args.device_map,
+                    "--attn_impl",
+                    "eager",  # logging requires attentions
+                    "--max_new_tokens",
+                    str(args.max_new_tokens),
+                    "--eval_prompts_n",
+                    str(args.eval_prompts),
+                    "--load_in_4bit",
+                    str(int(bool(args.load_in_4bit))),
+                    "--epsilon",
+                    str(args.epsilon),
+                    "--alpha",
+                    str(args.alpha),
+                    "--beta",
+                    str(args.beta),
+                    "--out_dir",
+                    args.out_dir,
+                    "--run_fast",
+                    "1",
+                ],
+                PROJECT_ROOT,
+            )
     else:
         print("[logging run] skipped by flag")
 
     if not args.skip_lmeval:
-        run_cmd(
-            "lm-eval baseline vs Cert-Elastic",
-            [
-                py,
-                "-m",
-                "bench.run_lmeval_cert_compat",
-                "--model_id",
-                args.model_id,
-                "--dtype",
-                args.dtype,
-                "--device",
-                args.device_map,
-                "--attn_impl",
-                args.attn_impl,
-                "--epsilon",
-                str(args.epsilon),
-                "--alpha",
-                str(args.alpha),
-                "--beta",
-                str(args.beta),
-                "--tasks",
-                args.tasks,
-                "--fewshot",
-                str(args.fewshot),
-                "--limit",
-                str(args.limit),
-                "--out_dir",
-                args.out_dir,
-            ],
-            PROJECT_ROOT,
-        )
+        if args.preflight:
+            baseline_ok = _latest_run_with(Path(args.out_dir), "lmeval_baseline.json")
+            cert_ok = _latest_run_with(Path(args.out_dir), "lmeval_cert.json")
+        else:
+            baseline_ok = cert_ok = None
+
+        if args.preflight and baseline_ok and cert_ok:
+            print("[preflight] reuse lm-eval outputs (lmeval_baseline.json / lmeval_cert.json)")
+        else:
+            run_cmd(
+                "lm-eval baseline vs Cert-Elastic",
+                [
+                    py,
+                    "-m",
+                    "bench.run_lmeval_cert_compat",
+                    "--model_id",
+                    args.model_id,
+                    "--dtype",
+                    args.dtype,
+                    "--device",
+                    args.device_map,
+                    "--attn_impl",
+                    args.attn_impl,
+                    "--epsilon",
+                    str(args.epsilon),
+                    "--alpha",
+                    str(args.alpha),
+                    "--beta",
+                    str(args.beta),
+                    "--tasks",
+                    args.tasks,
+                    "--fewshot",
+                    str(args.fewshot),
+                    "--limit",
+                    str(args.limit),
+                    "--out_dir",
+                    args.out_dir,
+                ],
+                PROJECT_ROOT,
+            )
     else:
         print("[lm-eval] skipped by flag")
 
     if not args.skip_paper:
-        run_cmd(
-            "Paper-style synthetic sweep",
-            [
-                py,
-                "-m",
-                "bench.run_certelastic_paperstyle",
-                "--model_id",
-                args.model_id,
-                "--dtype",
-                args.dtype,
-                "--device_map",
-                args.device_map,
-                "--attn_impl",
-                args.attn_impl,
-                "--epsilon",
-                str(args.epsilon),
-                "--alpha",
-                str(args.alpha),
-                "--beta",
-                str(args.beta),
-                "--tasks",
-                paper_tasks,
-                "--n_items",
-                str(args.paper_n_items),
-                "--gen_len",
-                str(args.paper_gen_len),
-                "--temperature",
-                str(args.temperature),
-                "--top_p",
-                str(args.top_p),
-                "--top_k",
-                str(args.top_k),
-                "--load_in_4bit",
-                str(int(bool(args.load_in_4bit))),
-                "--out",
-                args.paper_out,
-            ],
-            PROJECT_ROOT,
-        )
+        if args.preflight and _json_file_ok(Path(args.paper_out)):
+            print(f"[preflight] reuse paper results at {Path(args.paper_out)}")
+        else:
+            run_cmd(
+                "Paper-style synthetic sweep",
+                [
+                    py,
+                    "-m",
+                    "bench.run_certelastic_paperstyle",
+                    "--model_id",
+                    args.model_id,
+                    "--dtype",
+                    args.dtype,
+                    "--device_map",
+                    args.device_map,
+                    "--attn_impl",
+                    args.attn_impl,
+                    "--epsilon",
+                    str(args.epsilon),
+                    "--alpha",
+                    str(args.alpha),
+                    "--beta",
+                    str(args.beta),
+                    "--tasks",
+                    paper_tasks,
+                    "--n_items",
+                    str(args.paper_n_items),
+                    "--gen_len",
+                    str(args.paper_gen_len),
+                    "--temperature",
+                    str(args.temperature),
+                    "--top_p",
+                    str(args.top_p),
+                    "--top_k",
+                    str(args.top_k),
+                    "--load_in_4bit",
+                    str(int(bool(args.load_in_4bit))),
+                    "--out",
+                    args.paper_out,
+                ],
+                PROJECT_ROOT,
+            )
     else:
         print("[paper] skipped by flag")
 
     if not args.skip_viz:
-        run_cmd(
+        figs_dir = Path(args.out_dir) / "figs"
+        if args.preflight and _json_file_ok(Path(args.paper_out)) and figs_dir.exists():
+            print(f"[preflight] reuse visualization artifacts in {figs_dir}")
+        else:
+            run_cmd(
             "Generate tables / plots",
             [
                 py,
