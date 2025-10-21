@@ -115,7 +115,12 @@ def load_math(split="test", n=None):
     if local is None:
         ds = None
         last_err = None
-        for ds_id in ("qwedsacf/competition_math", "hendrycks/competition_math", "competition_math"):
+        for ds_id in (
+            "EleutherAI/hendrycks_math",
+            "qwedsacf/competition_math",
+            "hendrycks/competition_math",
+            "competition_math",
+        ):
             try:
                 ds = load_dataset(ds_id, split=split)
                 break

@@ -118,7 +118,12 @@ def prefetch_datasets(smoke: bool = False, token: str | None = None):
         for cfg in math_cfgs:
             def _load_math():
                 last_error = None
-                for ds_id in ("qwedsacf/competition_math", "hendrycks/competition_math", "competition_math"):
+                for ds_id in (
+                    "EleutherAI/hendrycks_math",
+                    "qwedsacf/competition_math",
+                    "hendrycks/competition_math",
+                    "competition_math",
+                ):
                     try:
                         load_dataset(ds_id, cfg, **cache_kwargs)
                         return

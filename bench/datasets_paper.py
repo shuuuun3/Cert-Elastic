@@ -107,6 +107,7 @@ def load_math(split: str = "test", n: int | None = None):
             "precalculus",
         ]
         ds_ids = [
+            "EleutherAI/hendrycks_math",
             "qwedsacf/competition_math",
             "hendrycks/competition_math",
             "competition_math",
