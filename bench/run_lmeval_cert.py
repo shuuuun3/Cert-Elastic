@@ -146,6 +146,10 @@ def enable_local_datasets():
         args = list(args)
         if path_or_name is None and "path_or_name" in kwargs:
             path_or_name = kwargs.pop("path_or_name")
+        if path_or_name is None and "path" in kwargs:
+            path_or_name = kwargs.pop("path")
+        if path_or_name is None and "dataset" in kwargs:
+            path_or_name = kwargs.pop("dataset")
         if path_or_name is None and args:
             path_or_name = args.pop(0)
         if path_or_name is None:

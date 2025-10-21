@@ -216,8 +216,12 @@ def main():
     parser.add_argument("--skip-viz", action="store_true")
     parser.add_argument("--math-probe", action="store_true")
     parser.add_argument("--smoke-test", action="store_true")
+    parser.add_argument("--preflight", action="store_true")
 
     args = parser.parse_args()
+
+    if args.preflight and args.smoke_test:
+        raise SystemExit("[error] --preflight and --smoke-test are mutually exclusive.")
 
     if args.smoke_test:
         print("[preset] smoke-test overrides applied (T4-friendly).")
@@ -235,6 +239,24 @@ def main():
         args.skip_lmeval = True
         args.skip_paper = True
         args.skip_viz = True
+        args.math_probe = True
+    elif args.preflight:
+        print("[preset] preflight overrides applied (full coverage, low cost).")
+        args.dtype = "bfloat16"
+        args.device_map = "cuda:0"
+        args.attn_impl = "sdpa"
+        args.load_in_4bit = 0
+        args.max_new_tokens = min(args.max_new_tokens, 128)
+        args.eval_prompts = min(args.eval_prompts, 8)
+        if not args.tasks:
+            args.tasks = "gsm8k,humaneval,mbpp,hendrycks_math"
+        if args.limit == 0 or args.limit > 5:
+            args.limit = 5
+        args.paper_n_items = min(args.paper_n_items, 16)
+        args.paper_gen_len = min(args.paper_gen_len, 128)
+        args.skip_lmeval = False
+        args.skip_paper = False
+        args.skip_viz = False
         args.math_probe = True
 
     token_for_main = _resolve_hf_token()
