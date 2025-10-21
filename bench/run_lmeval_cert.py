@@ -220,9 +220,34 @@ def run_once(enable_cert: bool, args):
         print("[win32] code-eval 未対応のため HumanEval/MBPP を除外:", tasks)
     # Allow running tasks marked as "unsafe" (e.g. mbpp) by confirming explicitly.
     # lm_eval will execute task code when these tasks require code evaluation.
-    res = evaluator.simple_evaluate(model=lm, tasks=tasks, num_fewshot=args.fewshot,
-                                    limit=args.limit, bootstrap_iters=0,
-                                    confirm_run_unsafe_code=True)
+    limit_to_use = args.limit
+    fallback_limit = 200
+    while True:
+        try:
+            res = evaluator.simple_evaluate(
+                model=lm,
+                tasks=tasks,
+                num_fewshot=args.fewshot,
+                limit=limit_to_use,
+                bootstrap_iters=0,
+                confirm_run_unsafe_code=True,
+            )
+            break
+        except ValueError as err:
+            if (
+                "did not find any docs" in str(err).lower()
+                and (limit_to_use == 0 or limit_to_use > fallback_limit)
+            ):
+                print(
+                    f"[lm-eval] warn: received zero documents at limit={limit_to_use}. "
+                    f"Retrying with --limit {fallback_limit}."
+                )
+                limit_to_use = fallback_limit
+                continue
+            raise
+    if args.limit != limit_to_use:
+        print(f"[lm-eval] effective evaluation limit: {limit_to_use}")
+
     ours = {}
     for tname, tres in res["results"].items():
         k, v = pick_primary(tname, tres)

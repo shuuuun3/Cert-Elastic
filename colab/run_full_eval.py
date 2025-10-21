@@ -18,6 +18,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -52,6 +53,26 @@ def _env_cache_kwargs() -> dict:
         or os.environ.get("TRANSFORMERS_CACHE")
     )
     return {"cache_dir": cache} if cache else {}
+
+
+def _datasets_cache_dir() -> Path:
+    if os.environ.get("HF_DATASETS_CACHE"):
+        return Path(os.environ["HF_DATASETS_CACHE"]).expanduser()
+    if os.environ.get("HF_HOME"):
+        return (Path(os.environ["HF_HOME"]).expanduser() / "datasets")
+    if os.environ.get("TRANSFORMERS_CACHE"):
+        return (Path(os.environ["TRANSFORMERS_CACHE"]).expanduser().parent / "datasets")
+    return Path.home() / ".cache" / "huggingface" / "datasets"
+
+
+def _free_disk_bytes(path: Path) -> int:
+    target = path.expanduser()
+    try:
+        return shutil.disk_usage(target).free
+    except FileNotFoundError:
+        if target.parent.exists():
+            return shutil.disk_usage(target.parent).free
+        return shutil.disk_usage(Path.cwd()).free
 
 
 def prefetch_datasets(smoke: bool = False, token: str | None = None):
@@ -241,11 +262,16 @@ def main():
     parser.add_argument("--math-probe", action="store_true")
     parser.add_argument("--smoke-test", action="store_true")
     parser.add_argument("--preflight", action="store_true")
+    parser.add_argument("--force-full-lmeval", action="store_true")
 
     args = parser.parse_args()
 
     if args.preflight and args.smoke_test:
         raise SystemExit("[error] --preflight and --smoke-test are mutually exclusive.")
+
+    force_full_lmeval = (
+        args.force_full_lmeval or os.environ.get("CERT_ELASTIC_FORCE_FULL_LMEVAL") == "1"
+    )
 
     if args.smoke_test:
         print("[preset] smoke-test overrides applied (T4-friendly).")
@@ -282,6 +308,20 @@ def main():
         args.skip_paper = False
         args.skip_viz = False
         args.math_probe = True
+
+    if not args.skip_lmeval and args.limit == 0 and not force_full_lmeval:
+        cache_dir = _datasets_cache_dir()
+        free_bytes = _free_disk_bytes(cache_dir)
+        safety_bytes = 8 * 1024**3  # ~8GB
+        if free_bytes < safety_bytes:
+            fallback_limit = 200
+            print(
+                f"[lm-eval] warn: only {free_bytes / (1024**3):.1f} GB free under {cache_dir}. "
+                f"Auto-setting --limit {fallback_limit} to avoid empty datasets. "
+                "Set CERT_ELASTIC_FORCE_FULL_LMEVAL=1, pass --force-full-lmeval, "
+                "or supply --limit explicitly to override."
+            )
+            args.limit = fallback_limit
 
     token_for_main = _resolve_hf_token()
     token_missing = token_for_main is None
